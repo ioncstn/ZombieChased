@@ -1,0 +1,20 @@
+[package]
+name = "rect_practice"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ggez = "0.8.1"
+libm = "0.1.4"
+enum-map = "2.4.1"
+rand = "0.8.5"
+collision = {git = "https://github.com/rustgd/collision-rs"}
+ggez-egui = {git = "https://github.com/NemuiSen/ggez-egui"}
+cgmath = "0.18.0"
+
+
+[profile.release]
+debug = 1
+incremental = true
