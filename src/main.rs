@@ -21,7 +21,7 @@ use rand::{thread_rng, Rng};
 
 use libm::{atan2f, sqrt};
 
-use settings::{WIN_WIDTH, WIN_HEIGHT, PI, PX_MOVEMENT, BULLET_SPEED, RELOAD_TIME, PLAYER_HEIGHT, BULLET_HEIGHT, ENEMY_SPEED, ENEMY_COOLDOWN, PLAYER_WIDTH, ENEMY_WIDTH, BULLET_TIME, BULLET_WIDTH, BULLETS_SHOT, BULLETS_ANGLE, FOG_DISTANCE, ENEMY_FRAME_TIME, PARTICLE_HEALTH, PARTICLE_ANGLE};
+use settings::{WIN_WIDTH, WIN_HEIGHT, PI, PX_MOVEMENT, BULLET_SPEED, RELOAD_TIME, PLAYER_HEIGHT, BULLET_HEIGHT, ENEMY_SPEED, ENEMY_COOLDOWN, PLAYER_WIDTH, ENEMY_WIDTH, BULLET_TIME, BULLET_WIDTH, BULLETS_SHOT, BULLETS_ANGLE, FOG_DISTANCE, ENEMY_FRAME_TIME, PARTICLE_HEALTH, PARTICLE_ANGLE, PLAYER_FRAME_TIME};
 mod settings;
 
 fn vec_from_angle(angle: f32) -> Vec2 {
@@ -41,6 +41,12 @@ enum EntityTypes{
     Bullet,
     Enemy,
     Particle,
+}
+
+enum State{
+    Playing,
+    Paused,
+    Unpausing,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +73,8 @@ struct MainState {
     counter: u16,
     reloading: u16,
     bg: graphics::Image,
+    state: State,
+    dollars: u16,
     //egui: EguiBackend,
 }
 
@@ -78,11 +86,11 @@ impl MainState{
             entity_type: EntityTypes::Player,
             pos: Vec2::new(WIN_WIDTH / 2f32, WIN_HEIGHT / 2f32),
             rotation: 0f32,
-            image: graphics::Image::from_path(ctx, "/player.png")?,
+            image: graphics::Image::from_path(ctx, "/pl1.png")?,
             d: Vec2::ZERO,
             health: 100,
             frame: 0,
-            frame_time: 0,
+            frame_time: PLAYER_FRAME_TIME,
         };
         let bg = graphics::Image::from_path(ctx, "/backg.png")?;
         let cursor = graphics::Image::from_path(ctx, "/cursor.png")?;
@@ -103,8 +111,10 @@ impl MainState{
         let bullets = Vec::<Entity>::new();
         let enemies = Vec::<Entity>::new();
         let particles = Vec::<Entity>::new();
+        let state = State::Playing;
+        let dollars = 0;
 
-        Ok(MainState { player, reloading: 0, key_pressed, mouse_pos, cursor, bullets, counter: 60, enemies, bg, particles })
+        Ok(MainState { dollars, state, player, reloading: 0, key_pressed, mouse_pos, cursor, bullets, counter: 60, enemies, bg, particles })
     }
 
     fn fire_shot(&mut self, ctx: &mut Context) -> GameResult{
@@ -222,6 +232,7 @@ impl MainState{
                         certain_enemy.health = 0;
                     }
                     bullet.health = 0;
+                    self.dollars += 1;
                     for _ in 0..5{
 
                         //random in 20 degrees cone:
@@ -271,6 +282,40 @@ impl MainState{
     }
 
 
+    fn advance_frames(&mut self, entity: EntityTypes){
+        match entity{
+            EntityTypes::Player => {
+
+                self.player.frame_time -= 1;
+
+                if self.key_pressed.values().sum::<f32>() - self.key_pressed.get(&KeyCode::Space).unwrap() == 0f32 {
+                    self.player.frame_time = PLAYER_FRAME_TIME;
+                    if self.player.frame != 0 {
+                        self.player.frame = 0;
+                    }
+                }
+
+                if self.player.frame_time == 0 {
+                    self.player.frame = (self.player.frame + 1) % 9;
+                    self.player.frame_time = PLAYER_FRAME_TIME;
+                }
+            }
+            EntityTypes::Enemy => {
+                for enemy in &mut self.enemies {
+                    if distance(&self.player, enemy) < FOG_DISTANCE{
+                        if enemy.frame_time == 0{
+                            enemy.frame = (enemy.frame + 1) % 4;
+                            enemy.frame_time = ENEMY_FRAME_TIME;
+                        }
+                        enemy.frame_time -= 1;
+                    }
+                }
+            }
+
+            _ => (),
+        }
+    }
+
     fn draw_entity(&mut self, entity: EntityTypes, canvas: &mut graphics::Canvas, ctx: &ggez::Context){
 
         match entity{
@@ -280,8 +325,24 @@ impl MainState{
                     .scale(Vec2::new(2f32, 1.5))
                     .rotation(self.player.rotation)
                     .offset(Vec2::new(0.5, 0.5));
+
+                let gun_rot = self.player.rotation;
+                let dir = vec_from_angle(-gun_rot);
+                let gun_x = self.player.pos.x + dir.x * (PLAYER_HEIGHT + 20f32) / 2f32;
+                let gun_y = self.player.pos.y + dir.y * (PLAYER_HEIGHT + 20f32) / 2f32;
+
+                let gun_param = graphics::DrawParam::default()
+                    .dest(Vec2::new(gun_x, gun_y))
+                    .scale(Vec2::new(2f32, 1.5))
+                    .rotation(gun_rot)
+                    .offset(Vec2::new(0.5, 0.5));
+
+                if self.player.frame_time == PLAYER_FRAME_TIME{
+                    self.player.image = graphics::Image::from_path(ctx, format!("/pl{}.png", self.player.frame + 1)).unwrap();
+                }
         
                 canvas.draw(&self.player.image, player_param);
+                canvas.draw(&graphics::Image::from_path(ctx, "/gun1.png").unwrap(), gun_param);
             }
             EntityTypes::Bullet => {
                 let bullet_param = graphics::DrawParam::default()
@@ -302,8 +363,6 @@ impl MainState{
                 for enemy in &mut self.enemies {
                     if distance(&self.player, enemy) < FOG_DISTANCE{
                         if enemy.frame_time == 0{
-                            enemy.frame = (enemy.frame + 1) % 4;
-                            enemy.frame_time = ENEMY_FRAME_TIME;
                             let frame_nr = enemy.frame + 1;
                             enemy.image = graphics::Image::from_path(ctx, format!("/enemy_frame{frame_nr}.png")).unwrap();
                         }
@@ -311,7 +370,6 @@ impl MainState{
                             .dest(Vec2::new(enemy.pos.x, enemy.pos.y))
                             .rotation(enemy.rotation)
                         );
-                        enemy.frame_time -= 1;
                     }
                 }
             }
@@ -368,63 +426,78 @@ impl TreeValue for Value {
 
 impl event::EventHandler<ggez::GameError> for MainState {
     fn update(&mut self, ctx: &mut Context) -> ggez::GameResult {
+        match self.state{
+            State::Playing => {
 
+                self.advance_frames(EntityTypes::Player);
+                self.advance_frames(EntityTypes::Enemy);
 
-        //egui
-        //let egui_ctx = self.egui.ctx();
-        //egui::Window::new("egui-window").show(&egui_ctx, |ui| {
-		//	ui.label("a very nice gui :3");
-		//	if ui.button("print \"hello world\"").clicked() {
-		//		println!("hello world");
-		//	}
-		//});
-
-        self.handle_bounderies();
-        
-        self.player.pos.x = self.player.pos.x - self.key_pressed[&KeyCode::A] + self.key_pressed[&KeyCode::D];
-        self.player.pos.y = self.player.pos.y - self.key_pressed[&KeyCode::W] + self.key_pressed[&KeyCode::S];
-
-        //rotate player towards cursor
-        self.player.rotation = atan2f(self.mouse_pos.y - self.player.pos.y, self.mouse_pos.x - self.player.pos.x) - PI / 2f32;
-
-        //move bullets
-        for bullet in &mut self.bullets{
-            bullet.health -= 1;
-            bullet.pos.x += bullet.d.x;
-            bullet.pos.y += bullet.d.y;
-        }
-
-        //move particles
-        for particle in &mut self.particles {
-            particle.pos += particle.d;
-            particle.health -= 1;
-            particle.d.x = particle.d.x / 1.1f32;
-            particle.d.y = particle.d.y / 1.1f32;
-        }
-
-        //move enemies towards player
-        for enemy in &mut self.enemies{
-            enemy.rotation = atan2f(self.player.pos.y - enemy.pos.y, self.player.pos.x - enemy.pos.x) - PI / 2f32;
-            enemy.pos.x += enemy.d.x;
-            enemy.pos.y += enemy.d.y;
-            let dir = vec_from_angle(-enemy.rotation);
-            enemy.d.x = dir.x * ENEMY_SPEED;
-            enemy.d.y = dir.y * ENEMY_SPEED;
-        }
-
-        self.handle_collisions(ctx)?;
-
-        //clear bullets
-        self.clear_entities();
-
-        //reloading
-        if self.reloading != 0 {
-            self.reloading -= 1;
-        }
-
-        //counting down towards new enemy
-        if self.counter != 0 {
-            self.counter -= 1;
+                //egui
+                //let egui_ctx = self.egui.ctx();
+                //egui::Window::new("egui-window").show(&egui_ctx, |ui| {
+		        //	ui.label("a very nice gui :3");
+		        //	if ui.button("print \"hello world\"").clicked() {
+		        //		println!("hello world");
+		        //	}
+		        //});
+                
+                self.handle_bounderies();
+                
+                self.player.pos.x = self.player.pos.x - self.key_pressed[&KeyCode::A] + self.key_pressed[&KeyCode::D];
+                self.player.pos.y = self.player.pos.y - self.key_pressed[&KeyCode::W] + self.key_pressed[&KeyCode::S];
+                
+                //rotate player towards cursor
+                self.player.rotation = atan2f(self.mouse_pos.y - self.player.pos.y, self.mouse_pos.x - self.player.pos.x) - PI / 2f32;
+                
+                //move bullets
+                for bullet in &mut self.bullets{
+                    bullet.health -= 1;
+                    bullet.pos.x += bullet.d.x;
+                    bullet.pos.y += bullet.d.y;
+                }
+            
+                //move particles
+                for particle in &mut self.particles {
+                    particle.pos += particle.d;
+                    particle.health -= 1;
+                    particle.d.x = particle.d.x / 1.1f32;
+                    particle.d.y = particle.d.y / 1.1f32;
+                }
+            
+                //move enemies towards player
+                for enemy in &mut self.enemies{
+                    enemy.rotation = atan2f(self.player.pos.y - enemy.pos.y, self.player.pos.x - enemy.pos.x) - PI / 2f32;
+                    enemy.pos.x += enemy.d.x;
+                    enemy.pos.y += enemy.d.y;
+                    let dir = vec_from_angle(-enemy.rotation);
+                    enemy.d.x = dir.x * ENEMY_SPEED;
+                    enemy.d.y = dir.y * ENEMY_SPEED;
+                }
+            
+                self.handle_collisions(ctx)?;
+            
+                //clear bullets
+                self.clear_entities();
+            
+                //reloading
+                if self.reloading != 0 {
+                    self.reloading -= 1;
+                }
+            
+                //counting down towards new enemy
+                if self.counter != 0 {
+                    self.counter -= 1;
+                }
+            }
+            State::Paused => {
+                self.reloading = 179;
+            }
+            State::Unpausing => {
+                self.reloading -= 1;
+                if self.reloading == 0{
+                    self.state = State::Playing;
+                }
+            }
         }
 
         Ok(())
@@ -435,7 +508,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
 
         let mut canvas = graphics::Canvas::from_frame(ctx, Color::from_rgb(0,26,17));
 
-
         //if space is currently pressed, fire shot.
         if self.key_pressed[&KeyCode::Space] == 1f32 && self.reloading == 0 {
             self.fire_shot(ctx)?;
@@ -443,50 +515,69 @@ impl event::EventHandler<ggez::GameError> for MainState {
         if self.counter == 0{
             self.spawn_enemy(ctx)?;
         }
-
         //draw particles
         self.draw_entity(EntityTypes::Particle, &mut canvas, ctx);
-
         //draw player
         self.draw_entity(EntityTypes::Player, &mut canvas, ctx);
-
         //draw bullets
         self.draw_entity(EntityTypes::Bullet, &mut canvas, ctx);
-
         //draw enemies
         self.draw_entity(EntityTypes::Enemy, &mut canvas, ctx);
-
-
         //draw BG
         canvas.draw(&self.bg, graphics::DrawParam::default()
             .offset(Vec2::new(0.5, 0.5))
             .dest(self.player.pos));
-
-        //draw cursor
-        let cursor_param = graphics::DrawParam::default()
-            .dest(self.mouse_pos)
-            .scale(Vec2::new(2.5f32, 2.5f32))
-            .offset(Vec2::new(0.5, 0.5));
-        
-        canvas.draw(&self.cursor, cursor_param);
-
-        //draw FPS & enemies & HP
+        //draw egui
+        //let egui_param = graphics::DrawParam::default()
+        //    .dest(Vec2::new(WIN_WIDTH, WIN_HEIGHT));
+        //
+        //canvas.draw(&self.egui, egui_param);
+        match self.state{
+            State::Paused => {
+                let bg_param = graphics::DrawParam::default()
+                                            .dest(Vec2::new(WIN_WIDTH / 2f32, WIN_HEIGHT / 2f32))
+                                            .offset(Vec2::new(0.5, 0.5))
+                                            .color(graphics::Color::new(55f32, 148f32, 110f32, 0.05));
+                canvas.draw(&graphics::Image::from_path(ctx, "/paused_bg.png").unwrap(), bg_param);
+            },
+            State::Unpausing => {
+                let bg_param = graphics::DrawParam::default()
+                                            .dest(Vec2::new(WIN_WIDTH / 2f32, WIN_HEIGHT / 2f32))
+                                            .offset(Vec2::new(0.5, 0.5))
+                                            .color(graphics::Color::new(1f32, 0f32, 0f32, 0.05));
+                canvas.draw(&graphics::Image::from_path(ctx, "/pause_bg.png").unwrap(), bg_param);
+                //draw cursor
+                let cursor_param = graphics::DrawParam::default()
+                    .dest(self.mouse_pos)
+                    .scale(Vec2::new(2.5f32, 2.5f32))
+                    .offset(Vec2::new(0.5, 0.5));
+                canvas.draw(&self.cursor, cursor_param);
+                let left_secs = self.reloading / 60 + 1;
+                let countdown_param = graphics::DrawParam::default()
+                                                    .dest(Vec2::new(WIN_WIDTH / 2f32, WIN_HEIGHT / 2f32))
+                                                    .offset(Vec2::new(0.5, 0.5));
+                canvas.draw(&graphics::Image::from_path(ctx, format!("/countdown{}.png", left_secs)).unwrap(), countdown_param);
+            },
+            State::Playing => {
+                self.draw_entity(EntityTypes::Player, &mut canvas, ctx);
+                //draw cursor
+                let cursor_param = graphics::DrawParam::default()
+                    .dest(self.mouse_pos)
+                    .scale(Vec2::new(2.5f32, 2.5f32))
+                    .offset(Vec2::new(0.5, 0.5));
+                canvas.draw(&self.cursor, cursor_param);
+            }
+        }
+        //draw FPS & enemies & HP & dollars
         let fps = ctx.time.fps() as i16;
-        
         canvas.draw(&graphics::Text::new(fps.to_string()),
             ggez::graphics::DrawParam::default().dest(Vec2::new(0f32, 0f32)).color(Color::YELLOW));
         canvas.draw(&graphics::Text::new(format!("enemies: {}", self.enemies.len())), 
             ggez::graphics::DrawParam::default().dest(Vec2::new(0f32, 25f32)).color(Color::YELLOW));
         canvas.draw(&graphics::Text::new(format!("HP: {}", self.player.health)), 
             ggez::graphics::DrawParam::default().dest(Vec2::new(0f32, 50f32)).color(Color::YELLOW));
-
-
-        //draw egui
-        //let egui_param = graphics::DrawParam::default()
-        //    .dest(Vec2::new(WIN_WIDTH, WIN_HEIGHT));
-        //
-        //canvas.draw(&self.egui, egui_param);
-
+        canvas.draw(&graphics::Text::new(format!("dollars: {}", self.dollars)), 
+            ggez::graphics::DrawParam::default().dest(Vec2::new(0f32, 75f32)).color(Color::YELLOW));
 
         canvas.finish(ctx)?;
 
@@ -521,6 +612,13 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     *self.key_pressed.get_mut(&key).unwrap() = 1f32;
                 }
             },
+            Some(KeyCode::P) => {
+                match self.state {
+                    State::Playing => self.state = State::Paused,
+                    State::Paused => self.state = State::Unpausing,
+                    State::Unpausing => self.state = State::Paused,
+                }
+            }
             _ => (),
         }
 

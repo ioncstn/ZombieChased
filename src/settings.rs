@@ -17,5 +17,6 @@ pub const ENEMY_HEIGHT: f32 = 20f32;
 pub const ENEMY_WIDTH: f32 = 40f32;
 pub const FOG_DISTANCE: f32 = 600f32;
 pub const ENEMY_FRAME_TIME: u8 = 5;
+pub const PLAYER_FRAME_TIME: u8 = 5;
 pub const PARTICLE_HEALTH: u16 = 60;
 pub const PARTICLE_ANGLE: f32 = PI / 6f32;
