@@ -1,7 +1,7 @@
 use ggez::{
     event,
     GameResult,
-    graphics,
+    graphics::{self, Color},
     Context,
     glam::*,
     input::keyboard::KeyInput,
@@ -21,7 +21,7 @@ use rand::{thread_rng, Rng};
 
 use libm::{atan2f, sqrt};
 
-use settings::{WIN_WIDTH, WIN_HEIGHT, PI, PX_MOVEMENT, BULLET_SPEED, RELOAD_TIME, PLAYER_HEIGHT, BULLET_HEIGHT, ENEMY_SPEED, ENEMY_COOLDOWN, PLAYER_WIDTH, ENEMY_WIDTH, BULLET_TIME, BULLET_WIDTH, BULLETS_SHOT, BULLETS_ANGLE, FOG_DISTANCE, ENEMY_FRAME_TIME, PARTICLE_HEALTH, PARTICLE_ANGLE, PLAYER_FRAME_TIME};
+use settings::{WIN_WIDTH, WIN_HEIGHT, PI, PX_MOVEMENT, BULLET_SPEED, PISTOL_RELOAD_TIME, PLAYER_HEIGHT, BULLET_HEIGHT, ENEMY_SPEED, ENEMY_COOLDOWN, PLAYER_WIDTH, ENEMY_WIDTH, BULLET_TIME, BULLET_WIDTH, BULLETS_SHOT, BULLETS_ANGLE, FOG_DISTANCE, ENEMY_FRAME_TIME, PARTICLE_HEALTH, PARTICLE_ANGLE, PLAYER_FRAME_TIME, MG_RELOAD_TIME};
 mod settings;
 
 fn vec_from_angle(angle: f32) -> Vec2 {
@@ -43,6 +43,13 @@ enum EntityTypes{
     Particle,
 }
 
+#[derive(PartialEq, Eq, Hash)]
+enum Guns{
+    Pistol,
+    MachineGun,
+}
+
+#[derive(PartialEq)]
 enum State{
     Playing,
     Paused,
@@ -73,8 +80,11 @@ struct MainState {
     counter: u16,
     reloading: u16,
     bg: graphics::Image,
+    paused_bg: graphics::Image,
     state: State,
     dollars: u16,
+    guns: std::collections::HashMap<Guns, u8>,
+    using_gun: Guns,
     //egui: EguiBackend,
 }
 
@@ -99,6 +109,11 @@ impl MainState{
 
         //let egui = EguiBackend::new(ctx);
 
+        let mut guns = std::collections::HashMap::new();
+        guns.insert(Guns::Pistol, 2);
+        guns.insert(Guns::MachineGun, 0);
+        let using_gun = Guns::Pistol;
+
         let mut key_pressed = std::collections::HashMap::new();
         key_pressed.insert(KeyCode::W, 0f32);
         key_pressed.insert(KeyCode::D, 0f32);
@@ -112,9 +127,10 @@ impl MainState{
         let enemies = Vec::<Entity>::new();
         let particles = Vec::<Entity>::new();
         let state = State::Playing;
-        let dollars = 0;
+        let dollars = 199;
+        let paused_bg = graphics::Image::from_path(ctx, "/paused_bg.png").unwrap();
 
-        Ok(MainState { dollars, state, player, reloading: 0, key_pressed, mouse_pos, cursor, bullets, counter: 60, enemies, bg, particles })
+        Ok(MainState { using_gun, guns, paused_bg, dollars, state, player, reloading: 0, key_pressed, mouse_pos, cursor, bullets, counter: 60, enemies, bg, particles })
     }
 
     fn fire_shot(&mut self, ctx: &mut Context) -> GameResult{
@@ -136,7 +152,12 @@ impl MainState{
                 frame: 0,
                 frame_time: 0,
             };
-            self.reloading = RELOAD_TIME;
+            let rt: u16;
+            match self.using_gun{
+                Guns::Pistol => {rt = PISTOL_RELOAD_TIME; }
+                Guns::MachineGun => {rt = MG_RELOAD_TIME; }
+            }
+            self.reloading = rt;
             self.bullets.push(new_bullet);
         }
         Ok(())
@@ -340,9 +361,13 @@ impl MainState{
                 if self.player.frame_time == PLAYER_FRAME_TIME{
                     self.player.image = graphics::Image::from_path(ctx, format!("/pl{}.png", self.player.frame + 1)).unwrap();
                 }
-        
+                let gun_nr: u8;
+                match self.using_gun{
+                    Guns::Pistol => { gun_nr = 1;}
+                    Guns::MachineGun => { gun_nr = 2;}
+                }
                 canvas.draw(&self.player.image, player_param);
-                canvas.draw(&graphics::Image::from_path(ctx, "/gun1.png").unwrap(), gun_param);
+                canvas.draw(&graphics::Image::from_path(ctx, format!("/gun{}.png", gun_nr)).unwrap(), gun_param);
             }
             EntityTypes::Bullet => {
                 let bullet_param = graphics::DrawParam::default()
@@ -388,6 +413,49 @@ impl MainState{
                 }
             }
         }
+    }
+
+    fn menu_guns(&mut self, canvas: &mut graphics::Canvas){
+        let mut x_pos = 100f32;
+        let y_pos = 600f32;
+        for gun in &self.guns{
+            let stat = gun.1;
+            let mut str1 = "";
+            let mut str2 = "";
+            match stat{
+                0 => {
+                    str1 = "not bought";
+                    str2 = "buy for 200 dollars";
+                }
+                1 => {
+                    str1 = "ready for use";
+                    str2 = "can switch to";
+                }
+                2 => {
+                    str1 = "currently using";
+                    str2 = "currently using";
+                }
+                _ => {}
+            }
+
+            let gun_nr: u8;
+            match gun.0{
+                Guns::Pistol => {
+                    canvas.draw(&graphics::Text::new(format!("Pistol: {str1}")), 
+                        ggez::graphics::DrawParam::default().dest(Vec2::new(x_pos, y_pos)).color(Color::YELLOW));
+                    gun_nr = 1;
+                }
+                    Guns::MachineGun => {
+                        canvas.draw(&graphics::Text::new(format!("Machine Gun: {str1}")), 
+                            ggez::graphics::DrawParam::default().dest(Vec2::new(x_pos, y_pos)).color(Color::YELLOW));
+                    gun_nr = 2;
+                }
+            }
+            canvas.draw(&graphics::Text::new(format!("{str2} (key {gun_nr})")), 
+                ggez::graphics::DrawParam::default().dest(Vec2::new(x_pos, y_pos + 25f32)).color(Color::YELLOW));
+            x_pos += 250f32;
+        }
+
     }
 }
 
@@ -504,7 +572,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
     }
 
     fn draw(&mut self, ctx: &mut Context) -> ggez::GameResult {
-        use ggez::graphics::Color;
 
         let mut canvas = graphics::Canvas::from_frame(ctx, Color::from_rgb(0,26,17));
 
@@ -538,7 +605,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
                                             .dest(Vec2::new(WIN_WIDTH / 2f32, WIN_HEIGHT / 2f32))
                                             .offset(Vec2::new(0.5, 0.5))
                                             .color(graphics::Color::new(55f32, 148f32, 110f32, 0.05));
-                canvas.draw(&graphics::Image::from_path(ctx, "/paused_bg.png").unwrap(), bg_param);
+                canvas.draw(&self.paused_bg, bg_param);
+                self.menu_guns(&mut canvas);
             },
             State::Unpausing => {
                 let bg_param = graphics::DrawParam::default()
@@ -617,6 +685,27 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     State::Playing => self.state = State::Paused,
                     State::Paused => self.state = State::Unpausing,
                     State::Unpausing => self.state = State::Paused,
+                }
+            }
+            Some(KeyCode::Key1) | Some(KeyCode::Key2) => {
+                if self.state == State::Paused{
+                    let key = input.keycode.unwrap();
+                    let new_gun: Guns;
+                    match key{
+                        KeyCode::Key1 => { new_gun = Guns::Pistol; }
+                        _ => { new_gun = Guns::MachineGun; }
+                    }
+                    if self.guns[&new_gun] == 0{
+                        if self.dollars >= 200{
+                            self.dollars -= 200;
+                            *self.guns.get_mut(&new_gun).unwrap() = 1;
+                        }
+                    }
+                    else{
+                        *self.guns.get_mut(&self.using_gun).unwrap() = 1;
+                        self.using_gun = new_gun;
+                        *self.guns.get_mut(&self.using_gun).unwrap() = 2;
+                    }
                 }
             }
             _ => (),
