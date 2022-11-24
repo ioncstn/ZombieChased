@@ -5,7 +5,7 @@ use ggez::{
     Context,
     glam::*,
     input::keyboard::KeyInput,
-    input::keyboard::KeyCode,
+    input::keyboard::KeyCode, audio::{self, SoundSource},
 };
 
 use cgmath::Point2;
@@ -85,6 +85,7 @@ struct MainState {
     dollars: u16,
     guns: std::collections::HashMap<Guns, u8>,
     using_gun: Guns,
+    shot_sound: audio::Source,
     //egui: EguiBackend,
 }
 
@@ -104,6 +105,7 @@ impl MainState{
         };
         let bg = graphics::Image::from_path(ctx, "/backg.png")?;
         let cursor = graphics::Image::from_path(ctx, "/cursor.png")?;
+        let shot_sound = audio::Source::new(ctx, "/fire_shot.ogg")?;
 
         ggez::input::mouse::set_cursor_hidden(ctx, true);
 
@@ -130,7 +132,7 @@ impl MainState{
         let dollars = 199;
         let paused_bg = graphics::Image::from_path(ctx, "/paused_bg.png").unwrap();
 
-        Ok(MainState { using_gun, guns, paused_bg, dollars, state, player, reloading: 0, key_pressed, mouse_pos, cursor, bullets, counter: 60, enemies, bg, particles })
+        Ok(MainState { shot_sound, using_gun, guns, paused_bg, dollars, state, player, reloading: 0, key_pressed, mouse_pos, cursor, bullets, counter: 60, enemies, bg, particles })
     }
 
     fn fire_shot(&mut self, ctx: &mut Context) -> GameResult{
@@ -160,6 +162,7 @@ impl MainState{
             self.reloading = rt;
             self.bullets.push(new_bullet);
         }
+        self.shot_sound.play(ctx)?;
         Ok(())
     }
 
