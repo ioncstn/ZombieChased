@@ -16,7 +16,7 @@
   .resources_dir_name(the_absolute_path_of_the_/resources_directory)
 ```
 
-- run 'cargo run --release'
+- run `cargo run --release`
 - enjoy
 
 # How to play
