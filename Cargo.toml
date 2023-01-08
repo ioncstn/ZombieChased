@@ -11,7 +11,6 @@ libm = "0.1.4"
 enum-map = "2.4.1"
 rand = "0.8.5"
 collision = {git = "https://github.com/rustgd/collision-rs"}
-ggez-egui = {git = "https://github.com/NemuiSen/ggez-egui"}
 cgmath = "0.18.0"
 
 
